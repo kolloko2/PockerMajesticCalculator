@@ -1,5 +1,6 @@
 ```python
   import os
+  import redis.asyncio as redis
   from fastapi import FastAPI, WebSocket, WebSocketDisconnect
   from fastapi.responses import HTMLResponse
   import json
@@ -9,6 +10,7 @@
   import uvicorn
 
   app = FastAPI()
+  redis_client = redis.from_url(os.getenv("REDIS_URL", "redis://localhost:6379"), decode_responses=True)
 
   # Карты и масти
   SUITS = ['♠', '♥', '♦', '♣']
@@ -16,8 +18,56 @@
   DECK = [r + s for r in RANKS for s in SUITS]
 
   # Game state management
-  game_state = {"players": [[] for _ in range(10)], "board": [], "folded": [], "pot_size": 0, "bet_to_call": 0, "num_players": 2}
-  connections = []  # List of active WebSocket connections
+  class GameState:
+      def __init__(self):
+          self.players = [[] for _ in range(10)]
+          self.board = []
+          self.folded = []
+          self.pot_size = 0
+          self.bet_to_call = 0
+          self.num_players = 2
+
+      async def load(self):
+          state = await redis_client.get("game_state")
+          if state:
+              data = json.loads(state)
+              self.num_players = data.get("num_players", 2)
+              self.players = data.get("players", [[] for _ in range(10)])
+              self.board = data.get("board", [])
+              self.folded = data.get("folded", [])
+              self.pot_size = data.get("pot_size", 0)
+              self.bet_to_call = data.get("bet_to_call", 0)
+
+      async def save(self):
+          await redis_client.set("game_state", json.dumps({
+              "num_players": self.num_players,
+              "players": self.players,
+              "board": self.board,
+              "folded": self.folded,
+              "pot_size": self.pot_size,
+              "bet_to_call": self.bet_to_call
+          }))
+
+  class ConnectionManager:
+      def __init__(self):
+          self.active_connections: list[WebSocket] = []
+          self.state = GameState()
+
+      async def connect(self, websocket: WebSocket):
+          await websocket.accept()
+          self.active_connections.append(websocket)
+          await self.state.load()
+          await websocket.send_json({"type": "init", "state": vars(self.state)})
+
+      def disconnect(self, websocket: WebSocket):
+          self.active_connections.remove(websocket)
+
+      async def broadcast(self, message: dict):
+          for connection in self.active_connections:
+              await connection.send_json(message)
+          await self.state.save()
+
+  manager = ConnectionManager()
 
   # Оценка комбинации
   def evaluate_hand(hand, board):
@@ -103,60 +153,55 @@
   # WebSocket endpoint
   @app.websocket("/ws")
   async def websocket_endpoint(websocket: WebSocket):
-      await websocket.accept()
-      connections.append(websocket)
-      await broadcast({"type": "init", "state": game_state})
+      await manager.connect(websocket)
       try:
           while True:
-              data = await websocket.receive_text()
-              message = json.loads(data)
-              if message["action"] == "update_num_players":
-                  game_state["num_players"] = message["num_players"]
-                  game_state["players"] = [[] for _ in range(game_state["num_players"])]
-                  game_state["folded"] = []
-                  await broadcast({"type": "update_num_players", "num_players": game_state["num_players"], "players": game_state["players"], "folded": game_state["folded"]})
-              elif message["action"] == "update_cards":
-                  game_state["players"][message["player_id"]] = message["cards"]
-                  await broadcast({"type": "update", "state": game_state})
-              elif message["action"] == "update_board":
-                  game_state["board"] = message["board"]
-                  await broadcast({"type": "update_board", "state": game_state})
-              elif message["action"] == "fold":
-                  if message["player_id"] not in game_state["folded"]:
-                      game_state["folded"].append(message["player_id"])
-                  await broadcast({"type": "fold", "state": game_state})
-              elif message["action"] == "update_betting":
-                  game_state["pot_size"] = message["pot_size"]
-                  game_state["bet_to_call"] = message["bet_to_call"]
-                  await broadcast({"type": "update_betting", "state": game_state})
-              elif message["action"] == "reset_game":
-                  game_state["players"] = [[] for _ in range(game_state["num_players"])]
-                  game_state["board"] = []
-                  game_state["folded"] = []
-                  game_state["pot_size"] = 0
-                  game_state["bet_to_call"] = 0
-                  await broadcast({"type": "reset_game", "state": game_state})
-              elif message["action"] == "calculate":
-                  active_hands = [hand if i not in game_state["folded"] else [] for i, hand in enumerate(game_state["players"])]
-                  active_players = [i for i in range(game_state["num_players"]) if i not in game_state["folded"]]
+              data = await websocket.receive_json()
+              action = data.get("action")
+              if action == "update_num_players":
+                  manager.state.num_players = data["num_players"]
+                  manager.state.players = [[] for _ in range(manager.state.num_players)]
+                  manager.state.folded = []
+                  await manager.broadcast({"type": "update_num_players", "num_players": manager.state.num_players, "players": manager.state.players, "folded": manager.state.folded})
+              elif action == "update_cards":
+                  manager.state.players[data["player_id"]] = data["cards"]
+                  await manager.broadcast({"type": "update", "state": vars(manager.state)})
+              elif action == "update_board":
+                  manager.state.board = data["board"]
+                  await manager.broadcast({"type": "update_board", "state": vars(manager.state)})
+              elif action == "fold":
+                  if data["player_id"] not in manager.state.folded:
+                      manager.state.folded.append(data["player_id"])
+                  await manager.broadcast({"type": "fold", "state": vars(manager.state)})
+              elif action == "update_betting":
+                  manager.state.pot_size = data["pot_size"]
+                  manager.state.bet_to_call = data["bet_to_call"]
+                  await manager.broadcast({"type": "update_betting", "state": vars(manager.state)})
+              elif action == "reset_game":
+                  manager.state.players = [[] for _ in range(manager.state.num_players)]
+                  manager.state.board = []
+                  manager.state.folded = []
+                  manager.state.pot_size = 0
+                  manager.state.bet_to_call = 0
+                  await manager.broadcast({"type": "reset_game", "state": vars(manager.state)})
+              elif action == "calculate":
+                  active_hands = [hand if i not in manager.state.folded else [] for i, hand in enumerate(manager.state.players)]
+                  active_players = [i for i in range(manager.state.num_players) if i not in manager.state.folded]
                   probabilities = monte_carlo_simulation(
                       [active_hands[i] for i in active_players],
-                      game_state["board"],
+                      manager.state.board,
                       len(active_players)
                   )
                   result = {"probabilities": {i: prob for i, prob in zip(active_players, probabilities)}}
-                  if game_state["pot_size"] and game_state["bet_to_call"]:
+                  if manager.state.pot_size and manager.state.bet_to_call:
                       win_prob = result["probabilities"].get(0, 0) / 100
-                      ev = (win_prob * game_state["pot_size"]) - ((1 - win_prob) * game_state["bet_to_call"])
+                      ev = (win_prob * manager.state.pot_size) - ((1 - win_prob) * manager.state.bet_to_call)
                       result["ev"] = ev
                       result["recommendation"] = "Колл" if ev > 0 else "Фолд"
-                  await broadcast({"type": "result", "result": result})
+                  await manager.broadcast({"type": "result", "result": result})
       except WebSocketDisconnect:
-          connections.remove(websocket)
-
-  async def broadcast(message):
-      for connection in connections:
-          await connection.send_text(json.dumps(message))
+          manager.disconnect(websocket)
+          await manager.broadcast({"type": "update", "state": vars(manager.state)})
 
   # Serve the frontend
   @app.get("/", response_class=HTMLResponse)
@@ -170,6 +215,6 @@
       return {"message": "No favicon available"}
 
   if __name__ == "__main__":
-      port = int(os.getenv("PORT", 8000))  # Используем $PORT для Render
+      port = int(os.getenv("PORT", 8000))
       uvicorn.run(app, host="0.0.0.0", port=port)
   ```
