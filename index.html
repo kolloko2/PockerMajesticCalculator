@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Красивый Калькулятор Вероятностей Покера</title>
+    <style>
+        body {
+            font-family: 'Arial', sans-serif;
+            background: linear-gradient(135deg, #74ebd5, #acb6e5);
+            margin: 0;
+            padding: 20px;
+            color: #333;
+        }
+        h1, h3 {
+            color: #1a2a6c;
+            text-align: center;
+        }
+        .container {
+            max-width: 1000px;
+            margin: 0 auto;
+            background: #ffffff;
+            padding: 30px;
+            border-radius: 15px;
+            box-shadow: 0 8px 16px rgba(0, 0, 0, 0.2);
+        }
+        .section {
+            margin-bottom: 25px;
+        }
+        .player {
+            display: flex;
+            align-items: center;
+            margin: 15px 0;
+            padding: 15px;
+            border: 2px solid #b2fefa;
+            border-radius: 10px;
+            background: #f7f9fc;
+            transition: transform 0.2s;
+        }
+        .player:hover {
+            transform: scale(1.02);
+        }
+        .player.folded {
+            background: #d3cce3;
+            opacity: 0.8;
+        }
+        .card {
+            width: 60px;
+            height: 80px;
+            margin: 0 10px;
+            padding: 10px;
+            border: 2px solid #74ebd5;
+            border-radius: 8px;
+            background: #fff;
+            font-size: 16px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+            text-align: center;
+        }
+        .card:hover {
+            transform: scale(1.1);
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+        }
+        .card.red {
+            color: red;
+        }
+        .card.black {
+            color: black;
+        }
+        .card.empty {
+            background: #e0e0e0;
+            color: #666;
+        }
+        .board {
+            display: flex;
+            justify-content: center;
+            margin: 20px 0;
+        }
+        .betting {
+            display: flex;
+            justify-content: center;
+            gap: 20px;
+            margin: 20px 0;
+        }
+        .betting input, .num-players select {
+            width: 120px;
+            padding: 8px;
+            border: 2px solid #acb6e5;
+            border-radius: 8px;
+        }
+        button {
+            padding: 10px 20px;
+            background: #1a2a6c;
+            color: #fff;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 16px;
+            transition: background 0.3s;
+        }
+        button:hover {
+            background: #b2fefa;
+            color: #1a2a6c;
+        }
+        #results {
+            margin-top: 25px;
+            padding: 15px;
+            background: #f7f9fc;
+            border-radius: 10px;
+            border: 2px solid #74ebd5;
+            font-family: 'Courier New', monospace;
+            white-space: pre-wrap;
+        }
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.5);
+            justify-content: center;
+            align-items: center;
+        }
+        .modal-content {
+            background: #fff;
+            padding: 20px;
+            border-radius: 10px;
+            max-width: 600px;
+            max-height: 80vh;
+            overflow-y: auto;
+        }
+        .card-grid {
+            display: grid;
+            grid-template-columns: repeat(13, 60px);
+            gap: 5px;
+            margin-top: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Красивый Калькулятор Вероятностей Покера</h1>
+        <div class="section num-players">
+            <label>Количество игроков (2–10): 
+                <select id="num-players" onchange="updateNumPlayers()">
+                    <option value="2">2</option>
+                    <option value="3">3</option>
+                    <option value="4">4</option>
+                    <option value="5">5</option>
+                    <option value="6">6</option>
+                    <option value="7">7</option>
+                    <option value="8">8</option>
+                    <option value="9">9</option>
+                    <option value="10">10</option>
+                </select>
+            </label>
+        </div>
+        <div id="players" class="section"></div>
+        <div id="board" class="section">
+            <h3>Карты на столе:</h3>
+            <div class="board">
+                <div class="card empty" id="board0" onclick="openCardModal('board', 0)">-</div>
+                <div class="card empty" id="board1" onclick="openCardModal('board', 1)">-</div>
+                <div class="card empty" id="board2" onclick="openCardModal('board', 2)">-</div>
+                <div class="card empty" id="board3" onclick="openCardModal('board', 3)">-</div>
+                <div class="card empty" id="board4" onclick="openCardModal('board', 4)">-</div>
+            </div>
+        </div>
+        <div id="betting" class="section">
+            <h3>Ставки:</h3>
+            <div class="betting">
+                <label>Размер банка: <input type="number" id="pot-size" min="0"></label>
+                <label>Ставка для колла: <input type="number" id="bet-to-call" min="0"></label>
+                <button onclick="updateBetting()">Обновить</button>
+            </div>
+        </div>
+        <div class="section">
+            <button onclick="resetGame()">Сбросить игру</button>
+            <button onclick="calculate()">Рассчитать</button>
+        </div>
+        <div id="results"></div>
+    </div>
+    <div id="cardModal" class="modal">
+        <div class="modal-content">
+            <h3>Выберите карту</h3>
+            <div id="cardGrid" class="card-grid"></div>
+            <button onclick="closeCardModal()">Закрыть</button>
+        </div>
+    </div>
+
+    <script>
+        const DECK = ["2♠","3♠","4♠","5♠","6♠","7♠","8♠","9♠","10♠","J♠","Q♠","K♠","A♠","2♥","3♥","4♥","5♥","6♥","7♥","8♥","9♥","10♥","J♥","Q♥","K♥","A♥","2♦","3♦","4♦","5♦","6♦","7♦","8♦","9♦","10♦","J♦","Q♦","K♦","A♦","2♣","3♣","4♣","5♣","6♣","7♣","8♣","9♣","10♣","J♣","Q♣","K♣","A♣"];
+        let ws;
+        let currentCardSelection = null;
+
+        function connect() {
+            ws = new WebSocket("ws://localhost:8000/ws");
+            ws.onmessage = handleMessage;
+            ws.onopen = () => console.log("Подключено");
+            ws.onerror = (error) => console.error("WebSocket error:", error);
+            ws.onclose = () => console.log("WebSocket closed");
+        }
+
+        function handleMessage(event) {
+            const message = JSON.parse(event.data);
+            const currentNumPlayers = parseInt(document.getElementById("num-players").value);
+            if (message.type === "init" || message.type === "update" || message.type === "update_num_players" || message.type === "update_board" || message.type === "fold" || message.type === "update_betting" || message.type === "reset_game") {
+                const numPlayers = message.state?.num_players || message.num_players || currentNumPlayers;
+                document.getElementById("num-players").value = numPlayers;
+                let players = message.state?.players || message.players || [];
+                if (players.length < numPlayers) {
+                    players = [...players, ...Array(numPlayers - players.length).fill([])];
+                } else if (players.length > numPlayers) {
+                    players = players.slice(0, numPlayers);
+                }
+                updatePlayers(players, message.state?.folded || message.folded || []);
+                updateBoard(message.state?.board || message.board || []);
+                if (message.type === "reset_game" || message.type === "init") {
+                    document.getElementById("pot-size").value = "";
+                    document.getElementById("bet-to-call").value = "";
+                    document.getElementById("results").textContent = "";
+                } else {
+                    document.getElementById("pot-size").value = message.state?.pot_size || message.pot_size || "";
+                    document.getElementById("bet-to-call").value = message.state?.bet_to_call || message.bet_to_call || "";
+                }
+            } else if (message.type === "result") {
+                displayResults(message.result);
+            }
+        }
+
+        function updateNumPlayers() {
+            const numPlayers = parseInt(document.getElementById("num-players").value);
+            if (numPlayers >= 2 && numPlayers <= 10) {
+                ws.send(JSON.stringify({action: "update_num_players", num_players: numPlayers}));
+            } else {
+                console.error("Invalid number of players");
+            }
+        }
+
+        function resetGame() {
+            ws.send(JSON.stringify({action: "reset_game"}));
+        }
+
+        function updatePlayers(players, folded) {
+            const numPlayers = parseInt(document.getElementById("num-players").value);
+            const playersDiv = document.getElementById("players");
+            playersDiv.innerHTML = "<h3>Игроки:</h3>";
+            for (let i = 0; i < numPlayers; i++) {
+                const div = document.createElement("div");
+                div.className = `player ${folded.includes(i) ? "folded" : ""}`;
+                div.innerHTML = `Игрок ${i + 1}: `;
+                const card1 = document.createElement("div");
+                const card2 = document.createElement("div");
+                card1.className = `card ${players[i][0] ? (players[i][0].endsWith("♥") || players[i][0].endsWith("♦") ? "red" : "black") : "empty"}`;
+                card2.className = `card ${players[i][1] ? (players[i][1].endsWith("♥") || players[i][1].endsWith("♦") ? "red" : "black") : "empty"}`;
+                card1.textContent = players[i][0] || "-";
+                card2.textContent = players[i][1] || "-";
+                card1.onclick = () => openCardModal("player", i, 0);
+                card2.onclick = () => openCardModal("player", i, 1);
+                div.appendChild(card1);
+                div.appendChild(card2);
+                const foldBtn = document.createElement("button");
+                foldBtn.textContent = "Сбросить";
+                foldBtn.onclick = () => fold(i);
+                div.appendChild(foldBtn);
+                playersDiv.appendChild(div);
+            }
+        }
+
+        function updateBoard(board) {
+            for (let i = 0; i < 5; i++) {
+                const cardEl = document.getElementById(`board${i}`);
+                cardEl.textContent = board[i] || "-";
+                cardEl.className = `card ${board[i] ? (board[i].endsWith("♥") || board[i].endsWith("♦") ? "red" : "black") : "empty"}`;
+            }
+        }
+
+        function openCardModal(type, id, cardIndex) {
+            currentCardSelection = { type, id, cardIndex };
+            const modal = document.getElementById("cardModal");
+            const cardGrid = document.getElementById("cardGrid");
+            cardGrid.innerHTML = "";
+            const usedCards = getUsedCards();
+            DECK.forEach(card => {
+                if (!usedCards.includes(card)) {
+                    const cardEl = document.createElement("div");
+                    cardEl.className = `card ${card.endsWith("♥") || card.endsWith("♦") ? "red" : "black"}`;
+                    cardEl.textContent = card;
+                    cardEl.onclick = () => selectCard(card);
+                    cardGrid.appendChild(cardEl);
+                }
+            });
+            modal.style.display = "flex";
+        }
+
+        function closeCardModal() {
+            document.getElementById("cardModal").style.display = "none";
+            currentCardSelection = null;
+        }
+
+        function selectCard(card) {
+            if (currentCardSelection) {
+                if (currentCardSelection.type === "player") {
+                    const { id, cardIndex } = currentCardSelection;
+                    const players = Array.from(document.getElementsByClassName("player")).map(p => {
+                        const cards = p.getElementsByClassName("card");
+                        return [cards[0].textContent !== "-" ? cards[0].textContent : "", cards[1].textContent !== "-" ? cards[1].textContent : ""];
+                    });
+                    players[id][cardIndex] = card;
+                    ws.send(JSON.stringify({action: "update_cards", player_id: id, cards: players[id].filter(c => c)}));
+                } else if (currentCardSelection.type === "board") {
+                    const board = Array.from(document.getElementsByClassName("board")[0].getElementsByClassName("card")).map(c => c.textContent !== "-" ? c.textContent : "");
+                    board[currentCardSelection.id] = card;
+                    ws.send(JSON.stringify({action: "update_board", board: board.filter(c => c)}));
+                }
+                closeCardModal();
+            }
+        }
+
+        function getUsedCards() {
+            const usedCards = new Set();
+            document.querySelectorAll(".player .card, .board .card").forEach(card => {
+                if (card.textContent !== "-") usedCards.add(card.textContent);
+            });
+            return Array.from(usedCards);
+        }
+
+        function updateCards(playerId, cards) {
+            ws.send(JSON.stringify({action: "update_cards", player_id: playerId, cards: cards.filter(c => c)}));
+        }
+
+        function fold(playerId) {
+            ws.send(JSON.stringify({action: "fold", player_id: playerId}));
+        }
+
+        function markFolded(playerId) {
+            const playerDivs = document.getElementsByClassName("player");
+            if (playerDivs[playerId]) {
+                playerDivs[playerId].classList.add("folded");
+            }
+        }
+
+        function updateBoardState() {
+            const board = Array.from(document.getElementsByClassName("board")[0].getElementsByClassName("card")).map(c => c.textContent !== "-" ? c.textContent : "");
+            ws.send(JSON.stringify({action: "update_board", board: board.filter(c => c)}));
+        }
+
+        function updateBetting() {
+            const potSize = parseFloat(document.getElementById("pot-size").value) || 0;
+            const betToCall = parseFloat(document.getElementById("bet-to-call").value) || 0;
+            ws.send(JSON.stringify({action: "update_betting", pot_size: potSize, bet_to_call: betToCall}));
+        }
+
+        function calculate() {
+            ws.send(JSON.stringify({action: "calculate"}));
+        }
+
+        function displayResults(result) {
+            let text = "Вероятности выигрыша:\n\n";
+            for (const [player, prob] of Object.entries(result.probabilities)) {
+                text += `Игрок ${parseInt(player) + 1}: ${prob.toFixed(2)}%\n`;
+            }
+            if (result.ev !== undefined) {
+                text += `\nДля игрока 1:\nEV для колла: ${result.ev.toFixed(2)}\nРекомендация: ${result.recommendation}`;
+            }
+            document.getElementById("results").textContent = text;
+        }
+
+        // Initialize with default number of players
+        connect();
+    </script>
+</body>
+</html>
